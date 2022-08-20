@@ -1,27 +1,34 @@
 
-
+#include <FS.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Wire.h>
-#include <TFT_eSPI.h> // The TFT_eSPI library
+#include <TFT_eSPI.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
-#define USE_ESP_WIFIMANAGER_NTP     false
-#include <ESP_WiFiManager.h>
+#include <PageBuilder.h>
+#include <AutoConnect.h>
 
 #define SCREEN_WIDTH 480
 #define SCREEN_HEIGHT 320
 #define ZEILENHOEHE 22
 
 const char* ntpServer = "de.pool.ntp.org";
-const long  gmtOffset_sec = 3600;
-const int   daylightOffset_sec = 3600;
-const char* months[] PROGMEM = {"-","Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Now","Dez" };
+const char * defaultTimezone = "CET-1CEST,M3.5.0/2,M10.5.0/3";
+//const long  gmtOffset_sec = 3600;
+//const int   daylightOffset_sec = 3600;
+const char* months[] PROGMEM = {"Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Now","Dez" };
 const char* days[] PROGMEM = {"So","Mo","Di","Mi","Do","Fr","Sa" };
 struct tm timeinfo;
 
 TFT_eSPI tft = TFT_eSPI();
 HTTPClient http;
+
+StaticJsonDocument<1024> doc;
+
+WebServer Server;
+AutoConnect       Portal(Server);
+AutoConnectConfig Config;
 
 void setMessage(String msg, int y_pos)
 {
@@ -60,7 +67,7 @@ uint32_t read32(fs::File& f)
     return result;
 }
 
-void drawBmp(const char* filename, int16_t x, int16_t y)
+/*void drawBmp(const char* filename, int16_t x, int16_t y)
 {
 
     if ((x >= tft.width()) || (y >= tft.height()))
@@ -127,7 +134,7 @@ void drawBmp(const char* filename, int16_t x, int16_t y)
             Serial.println("[WARNING]: BMP format not recognized.");
     }
     bmpFS.close();
-}
+}*/
 
 // the setup function runs once when you press reset or power the board
 void setup()
@@ -157,16 +164,17 @@ void setup()
 
     tft.println("Starting Wifi Config");
 
-    Serial.print(F("\nStarting WifiMan on ")); Serial.println(ARDUINO_BOARD); 
-    Serial.println(ESP_WIFIMANAGER_VERSION);
-    ESP_WiFiManager ESP_wifiManager("CxExtDisplay");
-    ESP_wifiManager.autoConnect("WifiManAP");
+    Config.autoReconnect = true;
+    Portal.config(Config);
 
-    if (WiFi.status() == WL_CONNECTED)
-    {
+    if (Portal.begin())
+    {        
         tft.println("Connected "+ WiFi.localIP().toString());
 
-        configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+        WiFi.enableAP(false);
+
+        configTzTime( defaultTimezone, ntpServer); //sets TZ and starts NTP sync
+        //configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
         if (!getLocalTime(&timeinfo))
         {
@@ -178,7 +186,7 @@ void setup()
         }
     }
 
-    if (!SPIFFS.begin(true))
+    /*if (!SPIFFS.begin(true))
     {
         tft.println("[ERROR]: SPIFFS initialisation failed!");
         while (1)
@@ -189,7 +197,7 @@ void setup()
     // Check for free space
 
     tft.print("Free Space: ");
-    tft.println(SPIFFS.totalBytes() - SPIFFS.usedBytes());
+    tft.println(SPIFFS.totalBytes() - SPIFFS.usedBytes());*/
 
     tft.println("Startup complete");
 
@@ -217,8 +225,8 @@ void loop()
 
         // Send request
         http.useHTTP10(true);
-        http.setConnectTimeout(1000);
-        http.setTimeout(1000);
+        http.setConnectTimeout(1500);
+        http.setTimeout(1500);
         http.begin("http://Bastet.lan:1337/api/osd/");
         int result = http.GET();
         //tft.println(result);
@@ -226,8 +234,8 @@ void loop()
         if (200 == result)
         {
             // Parse response
-            StaticJsonDocument<1024> doc;
-            DeserializationError error = deserializeJson(doc, http.getStream());
+            StaticJsonDocument<1024> buf;
+            DeserializationError error = deserializeJson(buf, http.getStream());
             if (error)
             {
                 Serial.println("deserializeJson() failed: ");
@@ -236,30 +244,7 @@ void loop()
             else
             {
                 //tft.println("deserializeJson() success ");
-                JsonArray arr = doc.as<JsonArray>();
-
-                
-                for (JsonVariant value : arr)
-                {
-                    //tft.println(value.as<char*>());
-                    
-                    /*char buf[50] = value.as<char*>();
-                    char *found = strstr(buf, "<APP>");
-                    if (NULL != found)
-                    {
-                        strcpy(buf, buf + 6);
-                    }
-                    setMessage(buf, i);*/
-
-                    String s = value.as<String>();
-                    s.replace("<APP>", "");
-                    s.trim();
-                    setMessage(s, i);
-                    
-                    //setMessage(value.as<String>(),i);
-                    
-                    i += ZEILENHOEHE;
-                }
+                doc=buf; 
             }
         }
         else
@@ -267,6 +252,24 @@ void loop()
 
         // Disconnect
         http.end();
+
+        //print Infos
+        JsonArray arr=doc.as<JsonArray>();
+        for (JsonVariant value : arr)
+        {
+            //tft.println(value.as<char*>());
+
+            String s = value.as<String>();
+            if(s != "null")
+            {  
+                s.replace("<APP>", "");
+                s.trim();
+                setMessage(s, i);
+                
+                i += ZEILENHOEHE;
+            }
+        
+        }
 
         //Print Time and Date at the End
         
@@ -287,6 +290,8 @@ void loop()
                 timeinfo.tm_min,
                 timeinfo.tm_sec);
             //Serial.println(timeStringBuff);
+            Serial.println(months[timeinfo.tm_mon]);
+            Serial.println(timeinfo.tm_mon);
             setMessage(timeStringBuff, i);
             i += ZEILENHOEHE;
         }
@@ -300,7 +305,7 @@ void loop()
     else
         Serial.println("no Wifi!");
 
-    for (int i = 0;i < 1000;i++)
+    for (int i = 0;i < 500;i++)
     {        
         delay(1);
     }
