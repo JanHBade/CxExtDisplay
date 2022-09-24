@@ -209,9 +209,6 @@ void setup()
 void loop()
 {
     //tft.fillScreen(TFT_BLACK);
-
-    //drawBmp("/logo.bmp", 0, 0);
-    tft.drawRect(0, 0, tft.width(), tft.height(), TFT_BLUE);
     
     /*
     tft.setCursor(4, 18);
@@ -263,6 +260,8 @@ void loop()
             if(s != "null")
             {  
                 s.replace("<APP>", "");
+                s.replace("%    ","%");
+                s.replace("C  ","C");
                 s.trim();
                 setMessage(s, i);
                 
@@ -304,6 +303,9 @@ void loop()
     }
     else
         Serial.println("no Wifi!");
+
+    //drawBmp("/logo.bmp", 0, 0);
+    tft.drawRect(0, 0, tft.width(), tft.height(), TFT_BLUE);
 
     for (int i = 0;i < 500;i++)
     {        
