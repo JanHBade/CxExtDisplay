@@ -24,4 +24,6 @@ jobs:
         run: pio run
       - uses: actions/upload-artifact@v3
         with:
-          path: .pio/build/Release/ # or path/to/artifact
+          path: |
+            .pio/build/Release/*.bin
+            .pio/build/Release/*.elf
