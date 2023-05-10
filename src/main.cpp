@@ -8,21 +8,26 @@
 #include <HTTPClient.h>
 #include <PageBuilder.h>
 #include <AutoConnect.h>
+#include <FT6236.h>
 
-#define SCREEN_WIDTH 480
-#define SCREEN_HEIGHT 320
 #define ZEILENHOEHE 22
+
+//Nach x Fehlzugriffen wird der Text ROT
+//und die Infos werden dann nicht mehr angezeigt
+//von 1 bis x-1 wird der Text GELB und alte Infos werden angezeigt
+#define STATE_RED 5
 
 const char* ntpServer = "de.pool.ntp.org";
 const char * defaultTimezone = "CET-1CEST,M3.5.0/2,M10.5.0/3";
-//const long  gmtOffset_sec = 3600;
-//const int   daylightOffset_sec = 3600;
-const char* months[] PROGMEM = {"Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Now","Dez" };
+const char* months[] PROGMEM = {"Jan","Feb","Mar","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Now","Dez" };
 const char* days[] PROGMEM = {"So","Mo","Di","Mi","Do","Fr","Sa" };
 struct tm timeinfo;
 
 TFT_eSPI tft = TFT_eSPI();
 HTTPClient http;
+
+//Touch
+FT6236 ts = FT6236();
 
 StaticJsonDocument<1024> doc;
 
@@ -30,7 +35,7 @@ WebServer Server;
 AutoConnect       Portal(Server);
 AutoConnectConfig Config;
 
-void setMessage(String msg, int y_pos)
+void setMessage(String msg, int y_pos, uint16_t color)
 {
     TFT_eSprite m = TFT_eSprite(&tft);
     m.setColorDepth(8);
@@ -41,7 +46,7 @@ void setMessage(String msg, int y_pos)
     //m.setTextFont()
     m.setFreeFont(&FreeMonoBold12pt7b);
     m.setTextDatum(TL_DATUM);
-    m.setTextColor(TFT_GREEN);
+    m.setTextColor(color);
     m.setCursor(0, ZEILENHOEHE-4);
     m.print(msg);
 
@@ -174,7 +179,6 @@ void setup()
         WiFi.enableAP(false);
 
         configTzTime( defaultTimezone, ntpServer); //sets TZ and starts NTP sync
-        //configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
         if (!getLocalTime(&timeinfo))
         {
@@ -184,6 +188,15 @@ void setup()
         {
             tft.println("NTP OK");
         }
+    }
+
+    if (!ts.begin(40,26,27))
+    {
+        Serial.println("[WARNING]: Unable to start the capacitive touchscreen.");
+    }
+    else
+    {
+        Serial.println("[INFO]: Capacitive touch started!");
     }
 
     /*if (!SPIFFS.begin(true))
@@ -201,7 +214,7 @@ void setup()
 
     tft.println("Startup complete");
 
-    delay(500);
+    delay(100);
     tft.fillScreen(TFT_BLACK);
 }
 
@@ -219,6 +232,7 @@ void loop()
     if (WiFi.status() == WL_CONNECTED)
     {
         int i = 1;
+        static int TryCnt=0;
 
         // Send request
         http.useHTTP10(true);
@@ -235,6 +249,9 @@ void loop()
             DeserializationError error = deserializeJson(buf, http.getStream());
             if (error)
             {
+                if(TryCnt < STATE_RED*2)
+                    TryCnt++;
+
                 Serial.println("deserializeJson() failed: ");
                 Serial.println(error.f_str());
             }
@@ -242,32 +259,40 @@ void loop()
             {
                 //tft.println("deserializeJson() success ");
                 doc=buf; 
+                TryCnt=0;
             }
         }
         else
+        {
+            if(TryCnt < STATE_RED*2)
+                    TryCnt++;
+                    
             Serial.println("HTTP Error: "+result);
+        }
 
         // Disconnect
         http.end();
 
         //print Infos
-        JsonArray arr=doc.as<JsonArray>();
-        for (JsonVariant value : arr)
+        if(TryCnt < STATE_RED )
         {
-            //tft.println(value.as<char*>());
+            JsonArray arr=doc.as<JsonArray>();
+            for (JsonVariant value : arr)
+            {
+                //tft.println(value.as<char*>());
 
-            String s = value.as<String>();
-            if(s != "null")
-            {  
-                s.replace("<APP>", "");
-                s.replace("%    ","%");
-                s.replace("C  ","C");
-                s.trim();
-                setMessage(s, i);
-                
-                i += ZEILENHOEHE;
+                String s = value.as<String>();
+                if(s != "null")
+                {  
+                    s.replace("<APP>", "");
+                    s.replace("%    ","%");
+                    s.replace("C  ","C");
+                    s.trim();
+                    setMessage(s, i, TFT_GREEN);
+                    
+                    i += ZEILENHOEHE;
+                }
             }
-        
         }
 
         //Print Time and Date at the End
@@ -289,16 +314,22 @@ void loop()
                 timeinfo.tm_min,
                 timeinfo.tm_sec);
             //Serial.println(timeStringBuff);
-            Serial.println(months[timeinfo.tm_mon]);
-            Serial.println(timeinfo.tm_mon);
-            setMessage(timeStringBuff, i);
+            //Serial.println(months[timeinfo.tm_mon]);
+            //Serial.println(timeinfo.tm_mon);
+            if (0==TryCnt)
+                setMessage(timeStringBuff, i, TFT_GREEN);
+            else if (TryCnt < STATE_RED)
+                setMessage(timeStringBuff, i, TFT_YELLOW);
+            else            
+                setMessage(timeStringBuff, i, TFT_RED);
+                
             i += ZEILENHOEHE;
         }
 
         //alten kram unten drunter überschreiben
-        for(;i<(SCREEN_HEIGHT-ZEILENHOEHE);i+=ZEILENHOEHE)
+        for(;i<(tft.height()-ZEILENHOEHE);i+=ZEILENHOEHE)
         {
-            setMessage("", i);
+            setMessage("", i, TFT_GREEN);
         }
     }
     else
@@ -306,6 +337,28 @@ void loop()
 
     //drawBmp("/logo.bmp", 0, 0);
     tft.drawRect(0, 0, tft.width(), tft.height(), TFT_BLUE);
+
+    if (ts.touched())
+    {
+
+      // Retrieve a point
+      TS_Point p = ts.getPoint();
+
+      //x umdrehen damit TFT und Touch zusammen passen
+      p.x = map(p.x, 0, tft.height(), tft.height(), 0);      
+      //Serial.println(String(p.x) + " " + String(p.y));
+
+      //x von oben (0) nach unten
+      //y von links (0) nach rechts
+      if (p.x < tft.height()/3)
+      {
+        Serial.println("oben gedrückt");
+      }
+      else if (p.x > tft.height()*2/3)
+      {
+        Serial.println("unten gedrückt");
+      }
+    }
 
     for (int i = 0;i < 500;i++)
     {        
