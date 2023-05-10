@@ -35,6 +35,27 @@ WebServer Server;
 AutoConnect       Portal(Server);
 AutoConnectConfig Config;
 
+ACText(start, "start");
+AutoConnectAux RootPage("/", "Startseite", false, {
+  start,
+    });
+
+ACInput(url, "http://Bastet.lan:1337/api/osd/", "URL");
+ACSubmit(btnsave, "&#220;bernehmen", "/save");
+ACSubmit(discard, "Abbrechen", "/_ac");
+AutoConnectAux settings("/settings", "Server Einstellungen", true, {
+  url,
+  btnsave,
+  discard
+    });
+
+ACText(caption2, "Gespeichert");
+ACText(parameters);
+AutoConnectAux save("/save", "gespeichert", false, {
+  caption2,
+  parameters
+    });
+
 void setMessage(String msg, int y_pos, uint16_t color)
 {
     TFT_eSprite m = TFT_eSprite(&tft);
@@ -170,7 +191,10 @@ void setup()
     tft.println("Starting Wifi Config");
 
     Config.autoReconnect = true;
+    Config.retainPortal = true;
     Portal.config(Config);
+
+    Portal.join({ RootPage,settings,save });
 
     if (Portal.begin())
     {        
@@ -214,7 +238,7 @@ void setup()
 
     tft.println("Startup complete");
 
-    delay(100);
+    delay(2000);
     tft.fillScreen(TFT_BLACK);
 }
 
@@ -238,7 +262,8 @@ void loop()
         http.useHTTP10(true);
         http.setConnectTimeout(1500);
         http.setTimeout(1500);
-        http.begin("http://Bastet.lan:1337/api/osd/");
+        //http.begin("http://Bastet.lan:1337/api/osd/");
+        http.begin(url.value);
         int result = http.GET();
         //tft.println(result);
 
@@ -361,7 +386,8 @@ void loop()
     }
 
     for (int i = 0;i < 500;i++)
-    {        
+    {
+        Portal.handleClient();        
         delay(1);
     }
 }
