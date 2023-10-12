@@ -256,12 +256,12 @@ void loop()
     if (WiFi.status() == WL_CONNECTED)
     {
         int i = 1;
-        static int TryCnt=0;
+        static int TryCnt=STATE_RED;
 
         // Send request
         http.useHTTP10(true);
-        http.setConnectTimeout(1500);
-        http.setTimeout(1500);
+        http.setConnectTimeout(3000);
+        http.setTimeout(3000);
         //http.begin("http://Bastet.lan:1337/api/osd/");
         http.begin(url.value);
         int result = http.GET();
